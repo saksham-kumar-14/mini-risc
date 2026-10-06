@@ -7,12 +7,14 @@
   # https://devenv.sh/packages/
   packages = [
     pkgs.iverilog
+    pkgs.verilator
     pkgs.gtkwave
     pkgs.verible
+    pkgs.gnumake
   ];
 
   # https://devenv.sh/languages/
-  # languages.rust.enable = true;
+  languages.python.enable = true;
 
   # https://devenv.sh/processes/
   # processes.dev.exec = "${lib.getExe pkgs.watchexec} -n -- ls -la";
@@ -21,25 +23,22 @@
   # services.postgres.enable = true;
 
   # https://devenv.sh/scripts/
-  scripts.build.exec = ''
-    iverilog -o sim.out ./src/*.v
-  '';
-
   scripts.sim.exec = ''
-    vvp sim.out
+    make sim
   '';
 
-  scripts.wave.exec = ''
-    gtkwave sim.vcd
+  scripts.test.exec = ''
+    make test
+  '';
+
+  scripts.lint.exec = ''
+    make lint
   '';
 
   # https://devenv.sh/basics/
   enterShell = ''
-    echo "this is a good dev env"
-    echo "Commands: "
-    echo "build"
-    echo "sim"
-    echo "wave - open gtkwave to view sim.vcd"
+    mkdir -p build
+        echo "mini-risc env: iverilog $(iverilog -V 2>&1 | head -n1 | awk '{print $4}'), verilator $(verilator --version | awk '{print $2}')"
   '';
 
   # https://devenv.sh/tasks/
@@ -49,12 +48,20 @@
   # };
 
   # https://devenv.sh/tests/
-  enterTest = ''
-    echo "Running tests"
-  '';
+  # enterTest = ''
+  #   echo "Running tests"
+  # '';
 
   # https://devenv.sh/git-hooks/
-  # git-hooks.hooks.shellcheck.enable = true;
+  git-hooks.hooks = {
+    verilator-lint = {
+      enable = true;
+      name = "verilator lint";
+      entry = "make lint";
+      files = "\\.(v|vh)$";
+      pass_filenames = false;
+    };
+  };
 
   # See full reference at https://devenv.sh/reference/options/
 }

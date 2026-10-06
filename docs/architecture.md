@@ -168,83 +168,6 @@ The low 32 bits of a product are the same for signed and unsigned operands, so `
 - **Word-addressed PC with PC + 1.** Removes the 2-bit alignment handling; one adder serves PC + 1, branch target and the `JAL` link.
 - **Non-pipelined with a tiny FSM.** No hazards, forwarding or delay slots; the cost is lower throughput, acceptable for the course.
 
-## 8. Design decisions explained (viva)
-
-### 8.1 Why there are muxes on the RS and RT read addresses
-
-**The root cause is the instruction format.** An R-type instruction has three register fields (rd, rs, rt). But I-type and branch formats use bits 15:0 as the immediate or offset, which **destroys the rt field**. Several instructions still need a second register operand or a constant, so the second read address cannot always come from `rt`. The register file has only two read ports, so instead of adding a third port, the `rt` port's address is steered by a mux (`rt_sel`):
-
-| rt\_sel | Address sent to rt port | Used by | Why |
-| --- | --- | --- | --- |
-| 000 | `rt` field | R-type (and I-type, where the value is ignored) | Normal case. In I-type the port reads junk bits of the immediate; harmless because `alu_src = 1` ignores it and reads have no side effect. |
-| 001 | `rd` field | `ST`, `BEQ BNE BLT BLE BGT BGE BV` | `ST` has no register destination, so the `rd` field is free to carry the **value to store**. Branches need a second comparison register and the offset consumed the `rt` field, so the free `rd` field supplies it. |
-| 010 | R0 | `MOVE`, `BZ` | Need a constant 0 as the second operand: `MOVE` computes rs + 0, `BZ` compares rs with 0. |
-| 011 | address 16 (HI) | `MFHI` | Reads HI into the ALU y operand. |
-| 100 | address 17 (LO) | `MFLO` | Reads LO into the ALU y operand. |
-
-The `rt_sel` mux replaced an earlier single `force_rt_zero` bit, which could express "R0" but not the HI/LO or `rd` cases.
-
-**The RS mux (`force_rs_zero`)** is a 2:1 mux choosing `rs` or R0. The ALU's x operand is always `rs_out`, and an immediate can only reach the ALU as y. So any instruction that needs "nothing + something" must zero x:
-
-- `LI rd, imm` = 0 + imm (y = immediate).
-- `MFHI` / `MFLO` = 0 + HI / LO (y = HI or LO from the rt port).
-
-Both reuse the existing ADD function, so no new ALU operation or datapath is needed. HI/LO selection was put on the already-existing `rt` mux (just two more inputs), while the `rs` side stays a cheap 2:1 mux.
-
-The same logic explains the other small muxes: `reg_dst` selects rd (almost all), LO (`MULU` has no destination field) or R15 (`JAL` uses the whole word for `jta`, so has no rd field). `reg_in_src` selects memory (`LD`), ALU (most), or PC + 1 (`JAL`). The `alu_src` mux chooses register versus immediate for y.
-
-### 8.2 Why LUI takes its input from y (the rt side), not x (rs)
-
-- The ALU has two operand ports. **x is always `rs_out`** (no mux in front of it). **y goes through the `alu_src` mux**, so y is the only port where the immediate can enter. `LUI rd, imm` has exactly one operand, the immediate, so the load-upper unit is wired to y (Fig. 2).
-- `LUI` has no source register, so the `rs` field is simply unused. No `force_rs_zero` is needed, unlike `LI`, where ADD uses both ports and x must be zeroed.
-- Using x would need either a second immediate mux on the x side or a new path: extra hardware for no benefit.
-- `LUI` uses only y\[15:0\], so it does not matter that the immediate extender sign-extends it (it only zero-extends when `alu_func[5:3] == 011`).
-
-### 8.3 Why branches use alu\_func = SUB and alu\_src = 0
-
-`alu_src = 0` makes y the second comparison register (not the offset in the immediate field). `SUB` is selected so the arithmetic unit produces `ovfl` for `BV`. The compare flags come from the compare unit on x and y regardless of `alu_func`.
-
-### 8.4 Why LD takes two cycles and how the FSM does it
-
-The data memory returns data one clock after the address is presented. In the first cycle (state RUN) `mem_read = 1` while `pc_enable = ic_enable = reg_write = 0`, so nothing is committed and the instruction word is held. The FSM moves to WAIT; with `halt_period = 0` it commits in that cycle (`reg_write`, `pc_enable`, `ic_enable` = 1, `reg_in_src = 00`) and returns to RUN. `ST` is single-cycle because a write needs no return data.
-
-### 8.5 Why the ROM is addressed with next\_pc
-
-If the ROM used `pc_out`, the instruction would arrive one cycle after the PC changed. Addressing it with `next_pc` makes the new PC and the new instruction appear on the same edge, so the control signals for instruction N are valid during the same cycle PC = N. This is also why IDLE forces `pc_src = 11` (PC = 0) with `ic_enable = 1`: instruction 0 is already waiting when `start` arrives.
-
-### 8.6 Why HALT does not advance the PC but NOP does
-
-`NOP` is a real instruction: `pc_enable = ic_enable = 1`, so execution continues. `HALT` clears both enables and sends the FSM to DONE, so the PC and instruction output freeze until `reset`.
-
-## 9. Quick viva answers
-
-- **Why separate opcodes for I-type?** The immediate overwrites the `fn` field, so the opcode must say which operation to perform.
-- **Why is NOP all zeros?** Cleared memory is harmless.
-- **Why sign extension for most and zero for logic?** Arithmetic and addresses need negative values; logic masks and `LUI`+`ORI` constant building need the upper half untouched.
-- **How does JAL save the return address?** The next-address adder output with `br_true = 0` is PC + 1; `reg_in_src = 10` routes it to R15 (`reg_dst = 11`).
-- **How does a function return?** `JR R15`.
-- **How is MFHI done without an ALU op?** ADD with x forced to R0 and y read from address 16.
-- **How are two registers compared for a branch if the offset takes the rt field?** The second register is read from the rd field via `rt_sel = 001`.
-- **What happens on an illegal opcode?** Default decode case: all enables 0 and the FSM goes to DONE.
-- **What leaves DONE?** Only `reset`, which returns to IDLE; then `start`.
-- **Difference between MUL and MULU?** MUL writes 32 bits to rd. MULU writes the full 64-bit product to HI:LO.
-- **Why does ST not write a register?** `reg_write = 0`; `reg_dst` and `reg_in_src` are don't-care.
-- **Branch range?** 16-bit signed word offset from PC + 1.
-
-## 10. Mismatches and items to verify before the viva
-
-Checked against `data_path.v` and `control_path.v`. The `next_address_decoder`, `alu` and `register_file` sources were not supplied, so items marked \* rely on the sketches.
-
-1. **Branch alu\_func.** The original control-word table listed `fn = XXXXXX` for branches; the code sets `SUB` (010001). This report uses the code. It is needed for `BV`.
-2. **MUL/MULU timing.** The original notes said 33 wait cycles; the code has the multi-cycle block commented out, so they are single-cycle today.
-3. **FSM sketch (Fig. 4).** It shows WAIT → DONE. In code, WAIT → RUN, and DONE is reached from RUN on `HALT` or an illegal opcode. Redraw before submitting.
-4. **Branch offset width (\*).** Fig. 3 shows a 26 → 30 bit sign extender on `jta` feeding both the jump mux and the branch adder. For branches the offset must be `sext(jta[15:0])`; if the whole 26-bit field were extended, the `rd` and `rs` bits would corrupt the offset. Confirm in the NAD source.
-5. **`shamt` unused.** It is decoded but never connected. Say it is reserved.
-6. **`reg_dst = 00` (rt) is never used.** It is vestigial because the destination is always `rd`.
-7. **R0 and registers 16/17 (\*).** Confirm the register file hard-wires R0 to zero and ignores writes to it. Because the fields are 5 bits, an instruction that encodes register 16 or 17 would read HI / LO directly; the assembler should only accept R0–R15.
-8. **Unary and signedness details (\*).** Confirm that `NOT` ignores y, that `MULU` multiplies unsigned, and that the compare unit's signed/unsigned behaviour matches the set and branch descriptions.
-9. **Signal names.** The original table abbreviations map to Verilog as: regdst → `reg_dst`, hi\_lo → `hi_lo_enable`, reg\_wr → `reg_write`, fn → `alu_func`, ld → `mem_read`, st → `mem_write`, reg\_in → `reg_in_src`, br\_t → `br_type`, pc\_en → `pc_enable`, ic\_en → `ic_enable`.
-
 ## Appendix A. Control words
 
 Select encodings. **reg\_dst**: 00 rt (unused), 01 rd, 10 LO, 11 R15. **reg\_in**: 00 memory, 01 ALU, 10 PC + 1, 11 zero. **pc\_src**: 00 PC + 1 (+ offset), 01 jta, 10 rs, 11 zero. **br\_t**: 001 EQ, 010 NE, 011 LT, 100 LE, 101 GT, 110 GE, 111 overflow. **rt\_sel**: 000 rt, 001 rd, 010 R0, 011 HI, 100 LO.
@@ -306,4 +229,3 @@ Select encodings. **reg\_dst**: 00 rt (unused), 01 rd, 10 LO, 11 R15. **reg\_in*
 | BGE | 010110 | XX | 0 | 0 | 0 | 010001 | 0 | 0 | XX | 00 | 1 | 110 | 0 | 001 |
 | BV | 010111 | XX | 0 | 0 | 0 | 010001 | 0 | 0 | XX | 00 | 1 | 111 | 0 | 001 |
 | HALT | 111111 | XX | 0 | 0 | X | XXXXXX | 0 | 0 | XX | 00 | 0 | X | 0 | 000 |
-
