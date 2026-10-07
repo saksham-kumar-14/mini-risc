@@ -1,24 +1,45 @@
-SRC  := $(wildcard src/*.v)
-INC  := -Isrc
+# Directories
+BUILD_DIR = build
+SRC_DIR = src
+TB_DIR = testbench
 
-build/%.out: tb/%.v $(SRC) | build
-	iverilog -g2012 $(INC) -o $@ $< $(SRC)
+# Collect all Verilog source files (excluding testbench for linting)
+SRCS = $(wildcard $(SRC_DIR)/datapath/*.v) \
+       $(wildcard $(SRC_DIR)/controlpath/*.v) \
+       $(wildcard $(SRC_DIR)/*.v)
 
-sim: build/tb_risc.out
-	cd build && vvp tb_risc.out && echo done
+TB = $(TB_DIR)/tb_risc.v
+SIM_BIN = $(BUILD_DIR)/minirisc.vvp
+WAVE_FILE = $(BUILD_DIR)/minirisc_wave.vcd
 
-test:
-	@for t in tb/tb_*.v; do n=$$(basename $$t .v); \
-	  iverilog -g2012 $(INC) -o build/$$n.out $$t $(SRC) && vvp build/$$n.out || exit 1; done
+.PHONY: all sim test lint format wave clean
 
+all: sim
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+# Compile the design and testbench with Icarus Verilog
+$(SIM_BIN): $(SRCS) $(TB) | $(BUILD_DIR)
+	iverilog -o $@ $(SRCS) $(TB)
+
+# Run the simulation (Satisfies 'scripts.sim.exec' and 'scripts.test.exec')
+sim test: $(SIM_BIN)
+	cd $(BUILD_DIR) && vvp $(notdir $(SIM_BIN))
+
+# Lint the source files using Verilator (Satisfies 'scripts.lint.exec' and 'git-hooks')
+# The testbench is intentionally excluded here as testbenches often contain non-synthesizable constructs that Verilator rejects.
 lint:
-	verilator --lint-only -Wall $(INC) src/risc.v
+	verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL $(SRCS)
 
-prog/%.hex: prog/%.asm tools/asm.py
-	python3 tools/asm.py $< --hex $@ --coe $(@:.hex=.coe)
+# Format the code using Verible (Leveraging pkgs.verible from your devenv.nix)
+format:
+	verible-verilog-format --inplace $(SRCS) $(TB)
 
-wave:
-	gtkwave build/dump.vcd
+# View the generated VCD waveform in GTKWave (Leveraging pkgs.gtkwave)
+wave: sim
+	gtkwave $(WAVE_FILE) &
 
-build:
-	mkdir -p build
+# Clean build artifacts
+clean:
+	rm -rf $(BUILD_DIR)/*

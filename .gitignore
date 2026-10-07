@@ -13,3 +13,6 @@ devenv.local.yaml
 
 sim.out
 sim.vcd
+
+
+build/

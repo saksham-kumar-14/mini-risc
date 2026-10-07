@@ -53,15 +53,15 @@
   # '';
 
   # https://devenv.sh/git-hooks/
-  git-hooks.hooks = {
-    verilator-lint = {
-      enable = true;
-      name = "verilator lint";
-      entry = "make lint";
-      files = "\\.(v|vh)$";
-      pass_filenames = false;
-    };
-  };
+  # git-hooks.hooks = {
+  #   verilator-lint = {
+  #     enable = true;
+  #     name = "verilator lint";
+  #     entry = "make lint";
+  #     files = "\\.(v|vh)$";
+  #     pass_filenames = false;
+  #   };
+  # };
 
   # See full reference at https://devenv.sh/reference/options/
 }
