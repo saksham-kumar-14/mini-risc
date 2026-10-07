@@ -1,6 +1,7 @@
 { pkgs, ... }:
 
 {
+  git-hooks.enable = false;
   # https://devenv.sh/basics/
   env.GREET = "devenv";
 
