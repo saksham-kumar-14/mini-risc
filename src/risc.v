@@ -77,7 +77,7 @@ module minirisc_basic_top (
     instruction_bram_rom fetch_bram_inst (
         .clk       (clk),
         .ic_enable (ic_enable),
-        .addr      (pc_out),
+        .addr      (next_pc),
         .inst      (inst)
     );
 
