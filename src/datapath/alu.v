@@ -54,7 +54,7 @@ module alu (
                     3'b000: alu_out = x & y;       // AND
                     3'b001: alu_out = x | y;       // OR
                     3'b010: alu_out = ~x;          // NOT (rt unused)
-                    3'b011: alu_out = ~(x | y);    // NOR
+                    3'b011: alu_out = ~(x|y);    // NOR
                     3'b100: alu_out = x ^ y;       // XOR
                     default: alu_out = 32'b0;
                 endcase

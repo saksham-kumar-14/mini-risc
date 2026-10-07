@@ -75,10 +75,10 @@ module minirisc_basic_top (
 
     // Configured as a single-port ROM per the requirements[cite: 6]
     instruction_bram_rom fetch_bram_inst (
-        .clk       (clk),
-        .ic_enable (ic_enable),
-        .addr      (next_pc),
-        .inst      (inst)
+        .clka       (clk),
+        .ena (ic_enable),
+        .addra      (next_pc),
+        .douta      (inst)
     );
 
     // =========================================================================
