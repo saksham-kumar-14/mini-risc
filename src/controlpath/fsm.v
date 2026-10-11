@@ -52,8 +52,8 @@ module control_fsm (
                 // Basic single-cycle stall (sufficient for LD).
                 // Multi-cycle multiplier will replace this with a halt_period counter later.
                 next_state = RUN;
-                pc_enable  = 1'b0;
-                ic_enable  = 1'b0;
+                pc_enable  = 1'b1;
+                ic_enable  = 1'b1;
             end
 
             DONE: begin

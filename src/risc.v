@@ -190,13 +190,21 @@ module minirisc_basic_top (
     );
 
     // =========================================================================
-    // 9. Write-Back Multiplexer
+    // 9. Data Memory & Write-Back Multiplexer
     // =========================================================================
-    // Selects data to be written into the register file[cite: 8].
-    // Data memory BRAM read is stubbed to 0 for this basic integration phase[cite: 8, 11].
 
-    wire [31:0] mem_read_data = 32'b0; // Placeholder for Single-Port Data RAM[cite: 7]
+    wire [31:0] mem_read_data;
 
+    // Instantiate the Data BRAM
+    data_bram_ram data_mem_inst (
+        .clk  (clk),
+        .we   (st),            // Store signal acts as write enable
+        .addr (alu_out),       // ALU computes base + offset for effective-address
+        .din  (rt_data),       // rt_sel dynamically routes the 'rd' field to rt_data for ST
+        .dout (mem_read_data)  // Fed into the write-back mux for LD
+    );
+
+    // Memory write-back select
     reg [31:0] writeback_mux;
     always @(*) begin
         case (reg_in)

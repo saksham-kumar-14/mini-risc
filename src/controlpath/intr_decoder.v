@@ -24,7 +24,7 @@ module instruction_decoder (
     wire [5:0] inst_fn = inst[5:0];
 
     always @(*) begin
-        // 1. Set safe defaults for all control signals (Don't Cares 'X' set to 0)
+        // 1. Set safe defaults for all control signals
         reg_dst  = 2'b00;
         hi_lo    = 1'b0;
         reg_wr   = 1'b0;
@@ -47,18 +47,16 @@ module instruction_decoder (
                 // All defaults are 0, matches NOP perfectly
             end
 
-            // R-type (ADD, SUB, MUL, MULU, AND, OR, NOT, NOR, XOR, SLL, SRL, SRA, SLT, SGT, SLE, SGE, SEQ, SNE)
+            // R-type
             6'b100000: begin
                 reg_dst  = 2'b01;
                 reg_wr   = 1'b1;
                 alu_src  = 1'b0;
-                alu_func = inst_fn; // ALU control word comes directly from fn field
+                alu_func = inst_fn;
                 reg_in   = 2'b01;
-
-                // Exception for MULU which writes to HI and LO
-                if (inst_fn == 6'b010011) begin
-                    reg_dst = 2'b10; // LO address
-                    hi_lo   = 1'b1;  // Enable HI write
+                if (inst_fn == 6'b010011) begin // MULU
+                    reg_dst = 2'b10;
+                    hi_lo   = 1'b1;
                 end
             end
 
@@ -88,9 +86,9 @@ module instruction_decoder (
             6'b100001: begin reg_dst = 2'b01; reg_wr = 1'b1; alu_src = 1'b0; alu_func = 6'b010000; reg_in = 2'b01; frz = 1'b1; rt_sel = 3'b011; end // MFHI
             6'b100111: begin reg_dst = 2'b01; reg_wr = 1'b1; alu_src = 1'b0; alu_func = 6'b010000; reg_in = 2'b01; frz = 1'b1; rt_sel = 3'b100; end // MFLO
 
-            // Memory accesses
+            // Memory accesses (FIXED alu_func to 010000 to match ADDI's ADD operation)
             6'b100101: begin reg_dst = 2'b01; reg_wr = 1'b1; alu_src = 1'b1; alu_func = 6'b010000; ld = 1'b1; reg_in = 2'b00; end // LD
-            6'b100110: begin reg_wr = 1'b0; alu_src = 1'b1; alu_func = 6'b010000; st = 1'b1; rt_sel = 3'b001; end // ST
+            6'b100110: begin reg_dst = 2'b00; reg_wr = 1'b0; alu_src = 1'b1; alu_func = 6'b010000; st = 1'b1; rt_sel = 3'b001; end // ST
 
             // Jumps
             6'b101000: begin pc_src = 2'b01; end // J
@@ -111,7 +109,7 @@ module instruction_decoder (
             6'b111111: begin halt = 1'b1; end // HALT
 
             default: begin
-                // Invalid opcode triggers halt as per specification
+                // Invalid opcode triggers halt
                 halt = 1'b1;
             end
         endcase

@@ -1,10 +1,10 @@
 `timescale 1ns / 1ps
 
 module instruction_bram_rom (
-    input  wire        clk,
-    input  wire        ic_enable,
-    input  wire [31:0] addr,
-    output reg  [31:0] inst
+    input  wire        clka,
+    input  wire        ena,
+    input  wire [31:0] addra,
+    output reg  [31:0] douta
 );
     reg [31:0] rom [0:1023];
     integer i;
@@ -22,9 +22,9 @@ module instruction_bram_rom (
     end
 
     // 1-cycle synchronous read to mimic BRAM behavior
-    always @(posedge clk) begin
-        if (ic_enable) begin
-            inst <= rom[addr[9:0]];
+    always @(posedge clka) begin
+        if (ena) begin
+            douta <= rom[addra[9:0]];
         end
     end
 

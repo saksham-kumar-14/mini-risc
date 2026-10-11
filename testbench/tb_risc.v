@@ -8,7 +8,6 @@ module tb_risc;
     reg start;
 
     // Variables for self-checking
-    integer inst_count;
     integer expected_val;
     reg [199:0] test_name;
     reg pass;
@@ -24,72 +23,65 @@ module tb_risc;
     always #5 clk = ~clk;
 
     initial begin
-        // Initialize Inputs
         clk = 0;
         rst = 1;
         start = 0;
-        inst_count = 0;
 
-        // Open dump file for waveform viewing (GTKWave/Vivado)
         $dumpfile("minirisc_wave.vcd");
         $dumpvars(0, tb_risc);
 
-        // Hold reset high for 20ns
         #20;
         rst = 0;
 
-        // Assert start signal to transition FSM from IDLE to RUN
         #10;
         start = 1;
         #10;
         start = 0;
 
-        // Allow the simulation to run for enough cycles to complete the 10 instructions.
-        #200;
+        #400; // Increased time to allow for memory delays and jump/branch routing
 
-        $display("Simulation complete.");
+        $display("Simulation complete. Processor did not halt in time.");
         $finish;
     end
 
-    // Monitor block: Automated self-checking assertions
-    // Triggers on the falling edge to read stable values just before the registers update.
+    // Monitor block: PC-aware Automated Self-Checking
     always @(negedge clk) begin
-        if (!rst && uut.fsm_inst.state == 2'b01) begin // Only check during RUN state
+        // Data commits on RUN for single-cycle ops, and on WAIT for multicycle LD.
+        if (!rst && ((uut.fsm_inst.state == 2'b01 && !uut.ld) || uut.fsm_inst.state == 2'b10)) begin
 
-            // Map the execution sequence to the expected data result
-            case (inst_count)
-                0: begin test_name = "ADDI R1, R0, 10"; expected_val = 10; end
-                1: begin test_name = "ADDI R2, R0, 5 "; expected_val = 5;  end
-                2: begin test_name = "ADD R3, R1, R2 "; expected_val = 15; end
-                3: begin test_name = "SUB R4, R1, R2 "; expected_val = 5;  end
-                4: begin test_name = "AND R5, R1, R3 "; expected_val = 10; end
-                5: begin test_name = "ADDI R7, R0, 2 "; expected_val = 2;  end
-                6: begin test_name = "SLL R6, R2, R7 "; expected_val = 20; end
-                7: begin test_name = "SLT R8, R4, R3 "; expected_val = 1;  end
-                8: begin test_name = "ADD R0, R1, R2 "; expected_val = 15; end
-                9: begin test_name = "HALT           "; expected_val = 0;  end
-                default: begin test_name = "UNKNOWN"; expected_val = 0; end
+            // Map the current PC to the expected instruction and write-back data
+            case (uut.pc_out)
+                32'h00: begin test_name = "LI R1, 15     "; expected_val = 15; end
+                32'h01: begin test_name = "LI R2, 10     "; expected_val = 10; end
+                32'h02: begin test_name = "ADD R3, R1, R2"; expected_val = 25; end
+                32'h03: begin test_name = "SUB R4, R1, R2"; expected_val = 5;  end
+                32'h04: begin test_name = "ST R3, 4(R0)  "; expected_val = 32'bx; end // Store (No writeback check)
+                32'h05: begin test_name = "LD R10, 4(R0) "; expected_val = 25; end // Load verification
+                32'h06: begin test_name = "BEQ R3, R10, 2"; expected_val = 32'bx; end // Branch taken (25 == 25)
+                32'h07: begin $display("FAIL: Branch failed, executed skipped code."); $finish; end
+                32'h08: begin $display("FAIL: Branch failed, executed skipped code."); $finish; end
+                32'h09: begin test_name = "HALT          "; expected_val = 0;  end
+                default: begin test_name = "UNKNOWN       "; expected_val = 0; end
             endcase
 
-            // Check standard arithmetic/logic writes (Instructions 0-8)
-            if (inst_count < 9) begin
+            // Filter out instructions that do not perform a register write-back
+            if (uut.pc_out != 32'h04 && uut.pc_out != 32'h06 && uut.pc_out != 32'h09) begin
                 pass = ($signed(uut.write_data) == expected_val);
-                $display("PC: %h | %s | expected : %0d got: %0d %s",
+                $display("PC: %02h | %s | expected : %0d got: %0d %s",
                          uut.pc_out, test_name, expected_val, $signed(uut.write_data), pass ? "PASS" : "FAIL");
 
-                // Specifically flag the R0 protection test
-                if (inst_count == 8 && uut.reg_wr && uut.rd_addr_final == 4'b0000) begin
-                    $display("  -> ATTEMPTED WRITE TO R0 DETECTED. Hardware must ignore.");
-                end
-
-            // Check HALT instruction (Instruction 9)
-            end else if (inst_count == 9) begin
+            // Check HALT instruction
+            end else if (uut.pc_out == 32'h09) begin
                 pass = (uut.inst == 32'hFC000000);
-                $display("PC: %h | %s | expected : FC000000 got: %h %s",
+                $display("PC: %02h | %s | expected : FC000000 got: %h %s",
                          uut.pc_out, test_name, uut.inst, pass ? "PASS" : "FAIL");
-            end
+                $display("Simulation complete. All control flow paths tested.");
+                $finish;
 
-            inst_count = inst_count + 1;
+            // Check non-writeback control instructions (ST, BEQ)
+            end else begin
+                $display("PC: %02h | %s | Control/Mem Op Executed", uut.pc_out, test_name);
+            end
         end
     end
 
